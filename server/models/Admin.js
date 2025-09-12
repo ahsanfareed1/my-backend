@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const bcrypt = require('bcryptjs');
+const crypto = require('crypto');
 
 const adminSchema = new mongoose.Schema({
   username: {
@@ -11,12 +12,16 @@ const adminSchema = new mongoose.Schema({
   },
   password: {
     type: String,
-    required: [true, 'Password is required']
+    required: false, // Initially empty, set when admin sets password
+    minlength: 6
   },
   email: {
     type: String,
+    required: [true, 'Email is required'],
     trim: true,
-    lowercase: true
+    lowercase: true,
+    unique: true,
+    match: [/^\w+([.-]?\w+)*@\w+([.-]?\w+)*(\.\w{2,3})+$/, 'Please enter a valid email']
   },
   fullName: {
     type: String,
@@ -25,7 +30,7 @@ const adminSchema = new mongoose.Schema({
   },
   role: {
     type: String,
-    enum: ['super_admin', 'admin', 'moderator'],
+    enum: ['super_admin', 'admin'],
     default: 'admin'
   },
   permissions: {
@@ -33,74 +38,141 @@ const adminSchema = new mongoose.Schema({
     manageListings: { type: Boolean, default: true },
     manageComplaints: { type: Boolean, default: true },
     manageReviews: { type: Boolean, default: true },
-    viewAnalytics: { type: Boolean, default: true }
+    viewAnalytics: { type: Boolean, default: true },
+    manageAdmins: { type: Boolean, default: false } // Only super_admin can manage other admins
+  },
+  status: {
+    type: String,
+    enum: ['active', 'pending', 'suspended', 'inactive'],
+    default: 'pending'
+  },
+  passwordResetToken: {
+    type: String,
+    default: null
+  },
+  passwordResetExpires: {
+    type: Date,
+    default: null
   },
   lastLogin: {
     type: Date,
-    default: Date.now
+    default: null
   },
-  isActive: {
+  isPasswordSet: {
     type: Boolean,
-    default: true
+    default: false
   },
-  createdAt: {
-    type: Date,
-    default: Date.now
+  createdBy: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Admin',
+    default: null // null for initial super admin
+  },
+  profilePicture: {
+    type: String,
+    default: null // Base64 encoded image or URL
+  },
+  phone: {
+    type: String,
+    default: null
   }
+}, {
+  timestamps: true
 });
 
-// Hash password before saving
+// indexes for faster queries
+// username and email indexes are automatically created by unique: true
+adminSchema.index({ role: 1 });
+adminSchema.index({ status: 1 });
+
+// virtual for full name
+adminSchema.virtual('displayName').get(function() {
+  return this.fullName;
+});
+
+// hashing password before saving (only if password is provided)
 adminSchema.pre('save', async function(next) {
-  if (!this.isModified('password')) return next();
+  if (!this.isModified('password') || !this.password) return next();
   
   try {
     const salt = await bcrypt.genSalt(12);
     this.password = await bcrypt.hash(this.password, salt);
+    this.isPasswordSet = true;
+    this.status = 'active'; // automatically activate account when password is set
     next();
   } catch (error) {
     next(error);
   }
 });
 
-// Method to compare password
+// comparing password
 adminSchema.methods.comparePassword = async function(candidatePassword) {
+  if (!this.password) return false;
   return await bcrypt.compare(candidatePassword, this.password);
 };
 
-// Static method to initialize default admins
-adminSchema.statics.initializeDefaultAdmins = async function() {
-  const defaultAdmins = [
-    {
-      username: 'ahsanfareed',
-      password: 'Group@08',
-      email: 'ahsanfareed@admin.com',
-      fullName: 'Ahsan Fareed',
-      role: 'super_admin'
-    },
-    {
-      username: 'alikhan',
-      password: 'Group@08',
-      email: 'alikhan@admin.com',
-      fullName: 'Ali Khan',
-      role: 'admin'
-    },
-    {
-      username: 'alihaider',
-      password: 'Group@08',
-      email: 'alihaider@admin.com',
-      fullName: 'Ali Haider',
-      role: 'admin'
-    }
-  ];
+// hashing password manually
+adminSchema.methods.hashPassword = async function(password) {
+  const saltRounds = 12;
+  this.password = await bcrypt.hash(password, saltRounds);
+  this.isPasswordSet = true;
+  this.status = 'active';
+  this.passwordResetToken = null;
+  this.passwordResetExpires = null;
+};
 
-  for (const adminData of defaultAdmins) {
-    const existingAdmin = await this.findOne({ username: adminData.username });
-    if (!existingAdmin) {
-      const admin = new this(adminData);
-      await admin.save();
-      console.log(`Created admin: ${adminData.username}`);
+// generating password reset token
+adminSchema.methods.generatePasswordResetToken = function() {
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  this.passwordResetToken = resetToken;
+  this.passwordResetExpires = Date.now() + 24 * 60 * 60 * 1000; // 24 hours
+  return resetToken;
+};
+
+// checking if password reset token is valid
+adminSchema.methods.isPasswordResetTokenValid = function() {
+  return this.passwordResetExpires > Date.now();
+};
+
+// creating default super admin
+adminSchema.statics.initializeDefaultSuperAdmin = async function() {
+  try {
+    const existingSuperAdmin = await this.findOne({ role: 'super_admin' });
+    
+    if (!existingSuperAdmin) {
+      const superAdmin = new this({
+        username: 'superadmin',
+        email: 'admin@aaaservices.com',
+        fullName: 'Super Administrator',
+        role: 'super_admin',
+        permissions: {
+          manageServiceProviders: true,
+          manageListings: true,
+          manageComplaints: true,
+          manageReviews: true,
+          viewAnalytics: true,
+          manageAdmins: true
+        },
+        status: 'active',
+        isPasswordSet: false
+      });
+      
+      await superAdmin.save();
+      console.log('Default super admin created. Please set password via email setup.');
     }
+  } catch (error) {
+    console.error('Error creating default super admin:', error);
   }
 };
+
+// making sure virtual fields are serialized
+adminSchema.set('toJSON', {
+  virtuals: true,
+  transform: function(doc, ret) {
+    delete ret.password;
+    delete ret.passwordResetToken;
+    delete ret.passwordResetExpires;
+    return ret;
+  }
+});
 
 module.exports = mongoose.model('Admin', adminSchema);

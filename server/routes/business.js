@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Business = require('../models/Business');
 const User = require('../models/user');
+// const redisCache = require('../config/redis'); // Temporarily disabled
 
 // Middleware to verify JWT token
 const authenticateToken = async (req, res, next) => {
@@ -18,25 +19,58 @@ const authenticateToken = async (req, res, next) => {
 
     const jwt = require('jsonwebtoken');
     const decoded = jwt.verify(token, process.env.JWT_SECRET || 'your-secret-key');
-    const user = await User.findById(decoded.userId).select('-password');
     
-    if (!user) {
+    // Check if it's an admin token
+    if (decoded.adminId) {
+      
+      const Admin = require('../models/Admin');
+      const admin = await Admin.findById(decoded.adminId).select('-password');
+      
+      if (!admin) {
+        return res.status(401).json({ 
+          message: 'Invalid admin token',
+          error: 'Admin not found for the provided token'
+        });
+      }
+
+      if (admin.status !== 'active') {
+        return res.status(401).json({ 
+          message: 'Admin account deactivated',
+          error: 'Your admin account has been deactivated. Please contact support.'
+        });
+      }
+
+      req.user = admin;
+      req.user.userType = 'admin';
+    } else if (decoded.userId) {
+      
+      const user = await User.findById(decoded.userId).select('-password');
+      
+      if (!user) {
+        return res.status(401).json({ 
+          message: 'Invalid token',
+          error: 'User not found for the provided token'
+        });
+      }
+
+      if (!user.isActive) {
+        return res.status(401).json({ 
+          message: 'Account deactivated',
+          error: 'Your account has been deactivated. Please contact support.'
+        });
+      }
+
+      req.user = user;
+    } else {
       return res.status(401).json({ 
-        message: 'Invalid token',
-        error: 'User not found for the provided token'
+        message: 'Invalid token structure',
+        error: 'Token does not contain valid user or admin information'
       });
     }
-
-    if (!user.isActive) {
-      return res.status(401).json({ 
-        message: 'Account deactivated',
-        error: 'Your account has been deactivated. Please contact support.'
-      });
-    }
-
-    req.user = user;
+    
     next();
   } catch (error) {
+    console.error('Token verification error:', error);
     if (error.name === 'JsonWebTokenError') {
       return res.status(403).json({ 
         message: 'Invalid token',
@@ -102,6 +136,7 @@ router.post('/', authenticateToken, validateBusinessInput, async (req, res) => {
       contact,
       location,
       services,
+      additionalServices,
       businessHours,
       images,
       tags
@@ -150,10 +185,11 @@ router.post('/', authenticateToken, validateBusinessInput, async (req, res) => {
         serviceAreas: location.serviceAreas || []
       },
       services: services || [],
+      additionalServices: additionalServices || [],
       businessHours: businessHours || {},
       images: images || {},
       tags: tags ? tags.map(tag => tag.trim()) : [],
-      status: 'pending' // New businesses start as pending for admin review
+      status: 'active' // New businesses start as active but unverified
     });
 
     await business.save();
@@ -168,13 +204,13 @@ router.post('/', authenticateToken, validateBusinessInput, async (req, res) => {
     await business.populate('owner', 'firstName lastName email profilePicture');
 
     res.status(201).json({
-      message: 'Thank you for registering your business with us! Your business will be activated soon when we verify it. You may receive a call or email for more verification if we require.',
+      message: 'Business registered successfully! Your business is now active and visible to customers. Upload verification documents to get the verified badge.',
       business,
       nextSteps: [
         'Complete your business profile with detailed information',
-        'Upload business images and documents',
+        'Upload business images and documents for verification',
         'Set your business hours and service areas',
-        'Wait for admin verification (usually within 24-48 hours)'
+        'Get verified badge after admin reviews your documents'
       ]
     });
 
@@ -196,11 +232,214 @@ router.post('/', authenticateToken, validateBusinessInput, async (req, res) => {
   }
 });
 
-// GET /api/business - Fetch all businesses (real-time for frontend)
+// Helper: ensure current user is business owner or admin
+const requireOwnerOrAdmin = async (req, res, next) => {
+  try {
+    const businessId = req.params.id || req.body.businessId || req.query.businessId;
+    if (!businessId) return res.status(400).json({ message: 'Business id is required' });
+    const business = await Business.findById(businessId);
+    if (!business) return res.status(404).json({ message: 'Business not found' });
+    const isOwner = String(business.owner) === String(req.user._id);
+    const isAdmin = req.user.userType === 'admin';
+    if (!isOwner && !isAdmin) {
+      return res.status(403).json({ message: 'Not authorized for this business' });
+    }
+    req.business = business;
+    next();
+  } catch (e) {
+    return res.status(500).json({ message: 'Authorization check failed' });
+  }
+};
+
+// POST /api/business/:id/verification-docs — owner uploads verification docs (base64 URLs)
+router.post('/:id/verification-docs', authenticateToken, requireOwnerOrAdmin, async (req, res) => {
+  try {
+    const { license, governmentId, supporting = [] } = req.body;
+    const business = req.business;
+    if (!license && !governmentId && (!supporting || supporting.length === 0)) {
+      return res.status(400).json({ message: 'At least one document is required' });
+    }
+
+    if (!business.verification) business.verification = { isVerified: false, documents: [] };
+    const docs = [];
+    if (license) docs.push(license);
+    if (governmentId) docs.push(governmentId);
+    if (Array.isArray(supporting)) docs.push(...supporting.filter(Boolean));
+    const mapped = docs.map(d => ({ type: String, uploadedAt: new Date(), toString: () => d }))
+      .map(d => (typeof d === 'string' ? d : String(d)));
+
+    business.verification.documents = [...(business.verification.documents || []), ...mapped];
+    // Keep business active, don't change status to pending
+    await business.save();
+
+    return res.json({
+      message: 'Documents uploaded successfully. Your business remains active while admin reviews your documents.',
+      business: await Business.findById(business._id).select('-__v')
+    });
+  } catch (error) {
+    console.error('Upload verification docs error:', error);
+    return res.status(500).json({ message: 'Failed to upload documents' });
+  }
+});
+
+// Alternate route signature to avoid client/server path mismatches
+router.post('/verification-docs/:id', authenticateToken, requireOwnerOrAdmin, async (req, res) => {
+  // Delegate to the same logic by setting req.params.id and calling the previous handler is complex here;
+  // Instead, simply reuse the code inline
+  try {
+    const { license, governmentId, supporting = [] } = req.body;
+    const business = await Business.findById(req.params.id);
+    if (!business) return res.status(404).json({ message: 'Business not found' });
+    const isOwner = String(business.owner) === String(req.user._id) || req.user.userType === 'admin';
+    if (!isOwner) return res.status(403).json({ message: 'Not authorized for this business' });
+
+    if (!license && !governmentId && (!supporting || supporting.length === 0)) {
+      return res.status(400).json({ message: 'At least one document is required' });
+    }
+    if (!business.verification) business.verification = { isVerified: false, documents: [] };
+    const docs = [];
+    if (license) docs.push(license);
+    if (governmentId) docs.push(governmentId);
+    if (Array.isArray(supporting)) docs.push(...supporting.filter(Boolean));
+    business.verification.documents = [...(business.verification.documents || []), ...docs];
+    // Keep business active, don't change status to pending
+    await business.save();
+    return res.json({ message: 'Documents uploaded successfully. Your business remains active while admin reviews your documents.', business });
+  } catch (e) {
+    console.error('Alt upload verification docs error:', e);
+    res.status(500).json({ message: 'Failed to upload documents' });
+  }
+});
+
+// POST /api/business/verification-docs — accepts businessId in body (safe fallback)
+router.post('/verification-docs', authenticateToken, async (req, res) => {
+  
+  try {
+    const { businessId, license, governmentId, supporting = [] } = req.body || {};
+    
+    
+    if (!businessId) return res.status(400).json({ message: 'businessId is required' });
+    const business = await Business.findById(businessId);
+    if (!business) return res.status(404).json({ message: 'Business not found' });
+    
+    
+    
+    const isOwner = String(business.owner) === String(req.user._id) || req.user.userType === 'admin';
+    if (!isOwner) return res.status(403).json({ message: 'Not authorized for this business' });
+    
+    if (!license && !governmentId && (!supporting || supporting.length === 0)) {
+      return res.status(400).json({ message: 'At least one document is required' });
+    }
+    
+    if (!business.verification) business.verification = { isVerified: false, documents: [] };
+    const docs = [];
+    if (license) docs.push(license);
+    if (governmentId) docs.push(governmentId);
+    if (Array.isArray(supporting)) docs.push(...supporting.filter(Boolean));
+    
+    
+    
+    business.verification.documents = [...(business.verification.documents || []), ...docs];
+    
+    
+    
+    // Keep business active, don't change status to pending
+    await business.save();
+    
+    
+    res.json({ message: 'Documents uploaded successfully. Your business remains active while admin reviews your documents.', business });
+  } catch (e) {
+    console.error('Body-based upload verification docs error:', e);
+    res.status(500).json({ message: 'Failed to upload documents' });
+  }
+});
+
+// Additional aliases for robustness
+router.post('/verify-docs', authenticateToken, async (req, res) => {
+  req.url = '/verification-docs';
+  return router.handle(req, res, () => {});
+});
+router.post('/upload-docs', authenticateToken, async (req, res) => {
+  req.url = '/verification-docs';
+  return router.handle(req, res, () => {});
+});
+// GET /api/business/verification/pending — admin list
+router.get('/verification/pending', authenticateToken, async (req, res) => {
+  try {
+    
+    if (req.user.userType !== 'admin') {
+      return res.status(403).json({ message: 'Admin access required' });
+    }
+    
+    // First, let's see all businesses and their verification status
+    const allBusinesses = await Business.find({}).select('businessName verification status');
+    
+    // Find businesses that are not verified yet (regardless of status)
+    const items = await Business.find({ 
+      $or: [
+        { 'verification.isVerified': { $ne: true } },
+        { 'verification.isVerified': { $exists: false } }
+      ]
+    })
+      .select('businessName businessType owner verification status createdAt location contact')
+      .populate('owner', 'firstName lastName email');
+    
+    
+    
+    // Filter out businesses that already have documents uploaded
+    const businessesWithDocs = items.filter(b => b.verification?.documents && b.verification.documents.length > 0);
+    const businessesWithoutDocs = items.filter(b => !b.verification?.documents || b.verification.documents.length === 0);
+    
+    
+    
+    res.json({ 
+      pending: businessesWithDocs,
+      withoutDocs: businessesWithoutDocs,
+      total: items.length,
+      withDocuments: businessesWithDocs.length,
+      withoutDocuments: businessesWithoutDocs.length
+    });
+  } catch (e) {
+    console.error('Error fetching pending verifications:', e);
+    res.status(500).json({ message: 'Failed to load pending verifications' });
+  }
+});
+
+// POST /api/business/:id/verification/decision — admin approve/reject
+router.post('/:id/verification/decision', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.userType !== 'admin') {
+      return res.status(403).json({ message: 'Admin access required' });
+    }
+    const business = await Business.findById(req.params.id);
+    if (!business) return res.status(404).json({ message: 'Business not found' });
+    const { decision, note } = req.body; // decision: 'approve' | 'reject'
+    if (!['approve', 'reject'].includes(decision)) {
+      return res.status(400).json({ message: 'Decision must be approve or reject' });
+    }
+    if (decision === 'approve') {
+      business.verification.isVerified = true;
+      business.verification.verifiedAt = new Date();
+      business.verification.verifiedBy = req.user._id;
+      business.status = 'active';
+      business.statusReason = undefined;
+    } else {
+      business.verification.isVerified = false;
+      business.status = 'rejected';
+      business.statusReason = note || 'Verification rejected. Please resubmit documents.';
+    }
+    business.statusUpdatedAt = new Date();
+    business.statusUpdatedBy = req.user._id;
+    await business.save();
+    res.json({ message: `Verification ${decision}d`, business });
+  } catch (e) {
+    console.error('Decision error', e);
+    res.status(500).json({ message: 'Failed to update verification decision' });
+  }
+});
+// GET /api/business - Fetch all businesses (optimized with caching)
 router.get('/', async (req, res) => {
   try {
-    console.log('🔍 Backend: GET /api/business - Request received');
-    console.log('🔍 Backend: GET /api/business - Query params:', req.query);
     
     const {
       page = 1,
@@ -215,49 +454,145 @@ router.get('/', async (req, res) => {
       status = 'active'
     } = req.query;
 
+    // Create cache key for this search
+    const cacheKey = {
+      page: parseInt(page),
+      limit: parseInt(limit),
+      businessType,
+      city,
+      search,
+      sortBy,
+      sortOrder,
+      isVerified,
+      minRating,
+      status
+    };
+
+    // Try to get from cache first
+              // Cache temporarily disabled for stability
+          // const cachedResult = await redisCache.getCachedBusinessSearch(cacheKey);
+          // if (cachedResult) {
+          //   console.log('🚀 Backend: Serving from cache');
+          //   return res.json(cachedResult);
+          // }
+
+    
+    
     const skip = (page - 1) * limit;
     let query = { status };
 
-    console.log('🔍 Backend: GET /api/business - Initial query:', query);
-
     // Apply filters
     if (businessType) query.businessType = businessType;
-    if (city) query['location.city'] = { $regex: city, $options: 'i' };
+    if (city) {
+      // Enhanced location search across multiple fields like Yelp
+      query.$or = [
+        { 'location.city': { $regex: city, $options: 'i' } },
+        { 'location.area': { $regex: city, $options: 'i' } },
+        { 'location.address': { $regex: city, $options: 'i' } },
+        { 'location.serviceAreas': { $in: [new RegExp(city, 'i')] } }
+      ];
+    }
     if (isVerified !== undefined) query['verification.isVerified'] = isVerified === 'true';
     if (minRating) query['rating.average'] = { $gte: parseFloat(minRating) };
 
-    // Apply search
-    if (search) {
-      query.$or = [
-        { businessName: { $regex: search, $options: 'i' } },
-        { description: { $regex: search, $options: 'i' } },
-        { tags: { $in: [new RegExp(search, 'i')] } },
-        { 'location.city': { $regex: search, $options: 'i' } }
-      ];
+    // Apply search - use text search if available, fallback to regex
+    if (search && search.trim()) {
+      const searchTerm = search.trim();
+      
+      // Try text search first (faster with indexes)
+      try {
+        const textSearchQuery = { 
+          status,
+          $text: { $search: searchTerm }
+        };
+        
+        // Apply additional filters to text search
+        if (businessType) textSearchQuery.businessType = businessType;
+        if (city) {
+          // Enhanced location search for text search as well
+          textSearchQuery.$or = [
+            { 'location.city': { $regex: city, $options: 'i' } },
+            { 'location.area': { $regex: city, $options: 'i' } },
+            { 'location.address': { $regex: city, $options: 'i' } },
+            { 'location.serviceAreas': { $in: [new RegExp(city, 'i')] } }
+          ];
+        }
+        if (isVerified !== undefined) textSearchQuery['verification.isVerified'] = isVerified === 'true';
+        if (minRating) textSearchQuery['rating.average'] = { $gte: parseFloat(minRating) };
+
+        // Execute text search
+        const textResults = await Business.find(textSearchQuery)
+          .populate('owner', 'firstName lastName email profilePicture')
+          .sort({ score: { $meta: 'textScore' } })
+          .skip(skip)
+          .limit(parseInt(limit))
+          .select('-verification.documents -__v');
+
+        const textTotal = await Business.countDocuments(textSearchQuery);
+
+        const response = {
+          businesses: textResults,
+          pagination: {
+            currentPage: parseInt(page),
+            totalPages: Math.ceil(textTotal / limit),
+            totalBusinesses: textTotal,
+            hasNextPage: page * limit < textTotal,
+            hasPrevPage: page > 1,
+            limit: parseInt(limit)
+          },
+          filters: { businessType, city, search, isVerified, minRating, status },
+          searchMethod: 'text'
+        };
+
+        // Cache the result
+        // await redisCache.cacheBusinessSearch(cacheKey, response); // Cache temporarily disabled
+        
+        
+        return res.json(response);
+        
+      } catch (textError) {
+        
+        // Fallback to regex search
+        query.$or = [
+          { businessName: { $regex: searchTerm, $options: 'i' } },
+          { description: { $regex: searchTerm, $options: 'i' } },
+          { tags: { $in: [new RegExp(searchTerm, 'i')] } },
+          { 'location.city': { $regex: searchTerm, $options: 'i' } },
+          { 'location.area': { $regex: searchTerm, $options: 'i' } },
+          { 'location.address': { $regex: searchTerm, $options: 'i' } }
+        ];
+      }
     }
 
-    console.log('🔍 Backend: GET /api/business - Final query:', query);
+    // Build sort object - optimize for common sort patterns
+    let sort = {};
+    if (sortBy === 'rating') {
+      sort = { 'rating.average': -1, 'rating.totalReviews': -1, createdAt: -1 };
+    } else if (sortBy === 'name') {
+      sort = { businessName: 1 };
+    } else if (sortBy === 'newest') {
+      sort = { createdAt: -1 };
+    } else if (sortBy === 'oldest') {
+      sort = { createdAt: 1 };
+    } else {
+      sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
+    }
 
-    // Build sort object
-    const sort = {};
-    sort[sortBy] = sortOrder === 'desc' ? -1 : 1;
+    
 
-    console.log('🔍 Backend: GET /api/business - Executing query...');
-
-    // Execute query
+    // Execute query with lean() for better performance
     const businesses = await Business.find(query)
       .populate('owner', 'firstName lastName email profilePicture')
       .sort(sort)
       .skip(skip)
       .limit(parseInt(limit))
-      .select('-verification.documents -__v');
+      .select('-verification.documents -__v')
+      .lean(); // Use lean() for better performance when you don't need Mongoose documents
 
-    console.log('🔍 Backend: GET /api/business - Found businesses:', businesses.length);
+    
 
     // Get total count for pagination
     const total = await Business.countDocuments(query);
-
-    console.log('🔍 Backend: GET /api/business - Total businesses in database:', total);
 
     // Calculate pagination info
     const totalPages = Math.ceil(total / limit);
@@ -274,26 +609,21 @@ router.get('/', async (req, res) => {
         hasPrevPage,
         limit: parseInt(limit)
       },
-      filters: {
-        businessType,
-        city,
-        search,
-        isVerified,
-        minRating,
-        status
-      }
+      filters: { businessType, city, search, isVerified, minRating, status },
+      searchMethod: 'regex'
     };
 
-    console.log('🔍 Backend: GET /api/business - Sending response');
+    // Cache the result
+    // await redisCache.cacheBusinessSearch(cacheKey, response); // Cache temporarily disabled
+    
+    
     res.json(response);
 
   } catch (error) {
-    console.error('🔍 Backend: Get businesses error:', error);
-    console.error('🔍 Backend: Error stack:', error.stack);
+    console.error('Get businesses error:', error);
     res.status(500).json({
       message: 'Server error while fetching businesses',
-      error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong',
-      stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
     });
   }
 });
@@ -407,6 +737,9 @@ router.put('/:id', authenticateToken, validateBusinessInput, async (req, res) =>
       { new: true, runValidators: true }
     ).populate('owner', 'firstName lastName email profilePicture');
 
+    // Cache invalidation temporarily disabled for stability
+    // await redisCache.invalidateBusinessCache(req.params.id);
+
     res.json({
       message: 'Business updated successfully',
       business: updatedBusiness
@@ -495,6 +828,77 @@ router.get('/owner/my-business', authenticateToken, async (req, res) => {
 
   } catch (error) {
     console.error('Get my business error:', error);
+    res.status(500).json({
+      message: 'Server error while fetching business',
+      error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
+    });
+  }
+});
+
+// GET /api/business/slug/:category/:slug - Get business by category and slug
+router.get('/slug/:category/:slug', async (req, res) => {
+  try {
+    const { category, slug } = req.params;
+    
+    // Map category slug to business type
+    const categoryToBusinessType = {
+      'plumbing-services': 'plumbing',
+      'electrical-services': 'electrical',
+      'cleaning-services': 'cleaning',
+      'painting-services': 'painting',
+      'gardening-landscaping': 'gardening',
+      'repair-maintenance': 'repair',
+      'transport-services': 'transport',
+      'security-services': 'security',
+      'education-training': 'education',
+      'food-catering': 'food',
+      'beauty-personal-care': 'beauty',
+      'health-medical': 'health',
+      'construction-services': 'construction',
+      'maintenance-services': 'maintenance',
+      'automotive-services': 'automotive',
+      'pet-services': 'other',
+      'pest-control': 'other',
+      'it-technology': 'other',
+      'business-services': 'other',
+      'other-services': 'other'
+    };
+
+    const businessType = categoryToBusinessType[category] || category;
+
+    // Find businesses by business type and generate slug from business name
+    const businesses = await Business.find({ 
+      businessType: businessType,
+      status: 'active'
+    })
+      .populate('owner', 'firstName lastName email profilePicture')
+      .select('-verification.documents -__v');
+
+    // Find business by matching slug
+    const business = businesses.find(biz => {
+      if (!biz.businessName) return false;
+      
+      const bizSlug = biz.businessName
+        .toLowerCase()
+        .replace(/[^a-z0-9\s-]/g, '')
+        .replace(/\s+/g, '-')
+        .replace(/-+/g, '-')
+        .replace(/^-+|-+$/g, ''); // Remove leading/trailing hyphens
+      
+      return bizSlug === slug;
+    });
+
+    if (!business) {
+      return res.status(404).json({
+        message: 'Business not found',
+        error: 'The requested business does not exist or is not active'
+      });
+    }
+
+    res.json({ business });
+
+  } catch (error) {
+    console.error('Get business by slug error:', error);
     res.status(500).json({
       message: 'Server error while fetching business',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
@@ -646,12 +1050,9 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
 
     business.status = status;
     
-    if (status === 'active' && !business.verification.isVerified) {
-      business.verification.isVerified = true;
-      business.verification.verifiedAt = new Date();
-      business.verification.verifiedBy = req.user._id;
-    }
-
+    // Only set verification to true if explicitly approved by admin
+    // Don't automatically verify when setting status to active
+    
     await business.save();
 
     res.json({
@@ -670,6 +1071,54 @@ router.patch('/:id/status', authenticateToken, async (req, res) => {
       message: 'Server error while updating business status',
       error: process.env.NODE_ENV === 'development' ? error.message : 'Something went wrong'
     });
+  }
+});
+
+// Temporary endpoint to reset all businesses to unverified (for testing)
+router.post('/reset-verification', authenticateToken, async (req, res) => {
+  try {
+    if (req.user.userType !== 'admin') {
+      return res.status(403).json({ message: 'Admin access required' });
+    }
+    
+    const result = await Business.updateMany(
+      {},
+      { 
+        'verification.isVerified': false,
+        'verification.verifiedAt': null,
+        'verification.verifiedBy': null
+      }
+    );
+    
+    res.json({ 
+      message: `Reset verification for ${result.modifiedCount} businesses`,
+      modifiedCount: result.modifiedCount
+    });
+  } catch (e) {
+    console.error('Error resetting verification:', e);
+    res.status(500).json({ message: 'Failed to reset verification' });
+  }
+});
+
+// Temporary endpoint to list all businesses (for debugging)
+router.get('/debug/all', async (req, res) => {
+  try {
+    const businesses = await Business.find({})
+      .select('businessName verification status owner')
+      .populate('owner', 'firstName lastName email');
+    res.json({ 
+      businesses: businesses.map(b => ({
+        name: b.businessName,
+        verified: b.verification?.isVerified,
+        hasDocs: b.verification?.documents?.length > 0,
+        status: b.status,
+        owner: b.owner?.firstName + ' ' + b.owner?.lastName
+      })),
+      total: businesses.length
+    });
+  } catch (e) {
+    console.error('Debug endpoint error:', e);
+    res.status(500).json({ message: 'Debug endpoint error' });
   }
 });
 

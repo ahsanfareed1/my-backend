@@ -132,7 +132,7 @@ const reviewSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Virtual for overall rating
+// virtual for overall rating
 reviewSchema.virtual('overallRating').get(function() {
   const ratings = [
     this.serviceQuality,
@@ -144,7 +144,7 @@ reviewSchema.virtual('overallRating').get(function() {
   return ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length;
 });
 
-// Virtual for review age
+// virtual for review age
 reviewSchema.virtual('reviewAge').get(function() {
   const now = new Date();
   const diffTime = Math.abs(now - this.createdAt);
@@ -157,7 +157,7 @@ reviewSchema.virtual('reviewAge').get(function() {
   return `${Math.floor(diffDays / 365)} years ago`;
 });
 
-// Indexes for better query performance
+// indexes for faster queries
 reviewSchema.index({ business: 1, createdAt: -1 });
 reviewSchema.index({ reviewer: 1, createdAt: -1 });
 reviewSchema.index({ rating: -1, createdAt: -1 });
@@ -165,7 +165,7 @@ reviewSchema.index({ serviceType: 1, rating: -1 });
 reviewSchema.index({ status: 1, isVerified: 1 });
 reviewSchema.index({ 'isHelpful.helpful': -1 });
 
-// Pre-save middleware to update business rating
+// updating business rating before saving
 reviewSchema.pre('save', async function(next) {
   if (this.isNew || this.isModified('rating')) {
     try {
@@ -178,7 +178,7 @@ reviewSchema.pre('save', async function(next) {
       if (business && business.rating) {
         console.log('🔍 Backend: Review pre-save - Found business, current rating:', business.rating);
         
-        // Ensure rating structure exists
+        // making sure rating structure exists
         if (!business.rating.ratingBreakdown) {
           business.rating.ratingBreakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
         }
@@ -191,17 +191,17 @@ reviewSchema.pre('save', async function(next) {
           business.rating.average = 0;
         }
         
-        // Ensure the specific rating exists
+        // making sure the specific rating exists
         const ratingKey = this.rating.toString();
         if (!business.rating.ratingBreakdown[ratingKey]) {
           business.rating.ratingBreakdown[ratingKey] = 0;
         }
         
-        // Update rating breakdown
+        // updating rating breakdown
         business.rating.ratingBreakdown[ratingKey]++;
         business.rating.totalReviews++;
         
-        // Calculate new average
+        // calculating new average
         const total = Object.values(business.rating.ratingBreakdown).reduce((sum, count) => sum + (count || 0), 0);
         business.rating.average = total > 0 ? 
           Object.entries(business.rating.ratingBreakdown)
@@ -218,13 +218,13 @@ reviewSchema.pre('save', async function(next) {
     } catch (error) {
       console.error('🔍 Backend: Error updating business rating:', error);
       console.error('🔍 Backend: Error stack:', error.stack);
-      // Don't fail the review save if rating update fails
+      // not failing the review save if rating update fails
     }
   }
   next();
 });
 
-// Method to mark review as helpful
+// marking review as helpful
 reviewSchema.methods.markHelpful = function(userId) {
   if (!this.isHelpful.helpfulUsers.includes(userId)) {
     this.isHelpful.helpful++;
@@ -234,7 +234,7 @@ reviewSchema.methods.markHelpful = function(userId) {
   return Promise.resolve(this);
 };
 
-// Method to mark review as not helpful
+// marking review as not helpful
 reviewSchema.methods.markNotHelpful = function(userId) {
   if (this.isHelpful.helpfulUsers.includes(userId)) {
     this.isHelpful.helpful--;
@@ -245,7 +245,7 @@ reviewSchema.methods.markNotHelpful = function(userId) {
   return Promise.resolve(this);
 };
 
-// Method to flag review
+// flagging review
 reviewSchema.methods.flagReview = function(userId, reason, description = '') {
   const flag = {
     reason,
@@ -255,7 +255,7 @@ reviewSchema.methods.flagReview = function(userId, reason, description = '') {
   
   this.flags.push(flag);
   
-  // Auto-hide review if it gets multiple flags
+  // auto-hiding review if it gets multiple flags
   if (this.flags.length >= 3) {
     this.status = 'hidden';
   }
@@ -263,7 +263,7 @@ reviewSchema.methods.flagReview = function(userId, reason, description = '') {
   return this.save();
 };
 
-// Method to get review summary (for listings)
+// getting review summary (for listings)
 reviewSchema.methods.getSummary = function() {
   const reviewObject = this.toObject();
   delete reviewObject.comment;
@@ -273,7 +273,7 @@ reviewSchema.methods.getSummary = function() {
   return reviewObject;
 };
 
-// Static method to find reviews by business
+// finding reviews by business
 reviewSchema.statics.findByBusiness = function(businessId, options = {}) {
   const query = { business: businessId, status: 'active' };
   
@@ -286,14 +286,14 @@ reviewSchema.statics.findByBusiness = function(businessId, options = {}) {
     .limit(options.limit || 10);
 };
 
-// Static method to find reviews by user
+// finding reviews by user
 reviewSchema.statics.findByUser = function(userId) {
   return this.find({ reviewer: userId, status: 'active' })
     .populate('business', 'businessName businessType images.logo')
     .sort({ createdAt: -1 });
 };
 
-// Static method to find top reviews
+// finding top reviews
 reviewSchema.statics.findTopReviews = function(limit = 10) {
   return this.find({ 
     status: 'active', 
@@ -306,7 +306,7 @@ reviewSchema.statics.findTopReviews = function(limit = 10) {
     .limit(limit);
 };
 
-// Static method to search reviews
+// searching reviews
 reviewSchema.statics.search = function(searchTerm, filters = {}) {
   const query = {
     status: 'active',

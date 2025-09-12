@@ -18,7 +18,11 @@ const businessSchema = new mongoose.Schema({
     enum: [
       'plumbing', 'electrical', 'cleaning', 'painting', 'gardening',
       'repair', 'transport', 'security', 'education', 'food',
-      'beauty', 'health', 'construction', 'maintenance', 'other'
+      'beauty', 'health', 'construction', 'roofing', 'maintenance', 
+      'legal', 'accounting', 'automotive', 'technology', 'business', 
+      'pet', 'pest', 'marketing', 'medical', 'dental', 'fitness',
+      'tutoring', 'language', 'event', 'photography', 'entertainment',
+      'financial', 'insurance', 'other'
     ]
   },
   description: {
@@ -152,23 +156,19 @@ const businessSchema = new mongoose.Schema({
       trim: true
     },
     cover: {
-      type: String,
-      trim: true
-    },
-    gallery: [{
-      type: String,
+      type: [String],
       trim: true,
       validate: {
         validator: function(v) {
-          // Check if gallery exists and is an array before accessing length
-          if (!this.gallery || !Array.isArray(this.gallery)) {
-            return true; // Allow undefined/empty gallery
+          // Validate that cover array has at most 5 images
+          if (Array.isArray(v) && v.length > 5) {
+            return false;
           }
-          return this.gallery.length <= 5;
+          return true;
         },
-        message: 'Gallery cannot have more than 5 images'
+        message: 'Cover photos cannot have more than 5 images'
       }
-    }]
+    }
   },
   businessHours: {
     monday: { 
@@ -280,14 +280,14 @@ const businessSchema = new mongoose.Schema({
   toObject: { virtuals: true }
 });
 
-// Pre-save middleware to automatically add "Service Provider" tag
+// automatically adding "Service Provider" tag
 businessSchema.pre('save', function(next) {
-  // Ensure tags array exists
+  // making sure tags array exists
   if (!this.tags) {
     this.tags = [];
   }
   
-  // Add "Service Provider" tag if not already present
+  // adding "Service Provider" tag if not already there
   if (!this.tags.includes('Service Provider')) {
     this.tags.push('Service Provider');
   }
@@ -295,17 +295,17 @@ businessSchema.pre('save', function(next) {
   next();
 });
 
-// Virtual for business URL
+// virtual for business URL
 businessSchema.virtual('businessUrl').get(function() {
   return `/api/business/${this._id}`;
 });
 
-// Virtual for full address
+// virtual for full address
 businessSchema.virtual('fullAddress').get(function() {
   return `${this.location.address}, ${this.location.area}, ${this.location.city}`;
 });
 
-// Virtual for average rating display
+// virtual for average rating display
 businessSchema.virtual('ratingDisplay').get(function() {
   if (!this.rating || typeof this.rating.average !== 'number') {
     return '0.0';
@@ -313,7 +313,7 @@ businessSchema.virtual('ratingDisplay').get(function() {
   return this.rating.average.toFixed(1);
 });
 
-// Indexes for better query performance
+// indexes for faster queries
 businessSchema.index({ 'location.city': 1, businessType: 1 });
 businessSchema.index({ 'location.coordinates': '2dsphere' });
 businessSchema.index({ businessType: 1, status: 1 });
@@ -321,9 +321,9 @@ businessSchema.index({ 'rating.average': -1 });
 businessSchema.index({ 'verification.isVerified': 1, status: 1 });
 businessSchema.index({ owner: 1 });
 
-// Pre-save middleware to update rating
+// updating rating before saving
 businessSchema.pre('save', function(next) {
-  // Ensure rating structure exists
+  // making sure rating structure exists
   if (!this.rating) {
     this.rating = {
       average: 0,
@@ -332,22 +332,22 @@ businessSchema.pre('save', function(next) {
     };
   }
   
-  // Ensure rating breakdown exists
+  // making sure rating breakdown exists
   if (!this.rating.ratingBreakdown) {
     this.rating.ratingBreakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   }
   
-  // Ensure totalReviews exists
+  // making sure totalReviews exists
   if (typeof this.rating.totalReviews !== 'number') {
     this.rating.totalReviews = 0;
   }
   
-  // Ensure average exists
+  // making sure average exists
   if (typeof this.rating.average !== 'number') {
     this.rating.average = 0;
   }
   
-  // Ensure images structure exists
+  // making sure images structure exists
   if (!this.images) {
     this.images = {
       logo: undefined,
@@ -356,7 +356,7 @@ businessSchema.pre('save', function(next) {
     };
   }
   
-  // Ensure gallery is always an array
+  // making sure gallery is always an array
   if (!Array.isArray(this.images.gallery)) {
     this.images.gallery = [];
   }
@@ -370,9 +370,9 @@ businessSchema.pre('save', function(next) {
   next();
 });
 
-// Method to update rating when review is added
+// updating rating when review is added
 businessSchema.methods.updateRating = function(newRating) {
-  // Ensure rating structure exists
+  // making sure rating structure exists
   if (!this.rating) {
     this.rating = {
       average: 0,
@@ -381,12 +381,12 @@ businessSchema.methods.updateRating = function(newRating) {
     };
   }
   
-  // Ensure rating breakdown exists
+  // making sure rating breakdown exists
   if (!this.rating.ratingBreakdown) {
     this.rating.ratingBreakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   }
   
-  // Ensure the specific rating exists
+  // making sure the specific rating exists
   const ratingKey = newRating.toString();
   if (!this.rating.ratingBreakdown[ratingKey]) {
     this.rating.ratingBreakdown[ratingKey] = 0;
@@ -395,7 +395,7 @@ businessSchema.methods.updateRating = function(newRating) {
   this.rating.ratingBreakdown[ratingKey]++;
   this.rating.totalReviews++;
   
-  // Calculate new average
+  // calculating new average
   const total = Object.values(this.rating.ratingBreakdown).reduce((sum, count) => sum + (count || 0), 0);
   this.rating.average = total > 0 ? 
     Object.entries(this.rating.ratingBreakdown)
@@ -404,7 +404,7 @@ businessSchema.methods.updateRating = function(newRating) {
   return this.save();
 };
 
-// Method to get business summary (for listings)
+// getting business summary (for listings)
 businessSchema.methods.getSummary = function() {
   const businessObject = this.toObject();
   delete businessObject.description;
@@ -416,14 +416,14 @@ businessSchema.methods.getSummary = function() {
   return businessObject;
 };
 
-// Static method to find businesses by location
+// finding businesses by location
 businessSchema.statics.findByLocation = function(city, businessType = null) {
   const query = { 'location.city': city, status: 'active' };
   if (businessType) query.businessType = businessType;
   return this.find(query).populate('owner', 'firstName lastName email');
 };
 
-// Static method to find verified businesses
+// finding verified businesses
 businessSchema.statics.findVerified = function() {
   return this.find({ 
     'verification.isVerified': true, 
@@ -431,7 +431,7 @@ businessSchema.statics.findVerified = function() {
   }).populate('owner', 'firstName lastName email');
 };
 
-// Static method to find businesses by type
+// finding businesses by type
 businessSchema.statics.findByType = function(businessType) {
   return this.find({ 
     businessType, 
@@ -439,7 +439,7 @@ businessSchema.statics.findByType = function(businessType) {
   }).populate('owner', 'firstName lastName email');
 };
 
-// Static method to search businesses
+// searching businesses
 businessSchema.statics.search = function(searchTerm, filters = {}) {
   const query = {
     status: 'active',

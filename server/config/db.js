@@ -2,37 +2,39 @@ const mongoose = require('mongoose');
 
 const connectDB = async () => {
   try {
-    // MongoDB Atlas connection options
+    const mongoUri = process.env.MONGO_URI_LOCAL || process.env.MONGO_URI || 'mongodb://localhost:27017/aaa_services';
+    
     const options = {
-      // Connection pooling
-      maxPoolSize: 10,
-      minPoolSize: 2,
+      // connection pooling settings
+      maxPoolSize: process.env.NODE_ENV === 'production' ? 10 : 5,
+      minPoolSize: process.env.NODE_ENV === 'production' ? 2 : 1,
       
-      // Timeout settings
+
       serverSelectionTimeoutMS: 5000,
       socketTimeoutMS: 45000,
       
-      // Write concern
+      // write concern
       w: 'majority',
       
-      // Retry settings
+      // retry settings
       retryWrites: true,
       retryReads: true,
       
-      // Buffer settings
+      // buffer settings
       bufferCommands: false,
       
-      // Auto index creation
+      // auto index creation
       autoIndex: true
     };
 
-    const conn = await mongoose.connect(process.env.MONGO_URI, options);
+    const conn = await mongoose.connect(mongoUri, options);
     
     console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
     console.log(`📊 Database: ${conn.connection.name}`);
     console.log(`🔌 Connection State: ${conn.connection.readyState}`);
+    console.log(`🌐 Connection Type: ${mongoUri.includes('localhost') ? 'Local MongoDB' : 'MongoDB Atlas'}`);
     
-    // Handle connection events
+    // handling connection events
     mongoose.connection.on('error', (err) => {
       console.error('❌ MongoDB connection error:', err);
     });
@@ -45,7 +47,7 @@ const connectDB = async () => {
       console.log('🔄 MongoDB reconnected');
     });
     
-    // Graceful shutdown
+    // graceful shutdown
     process.on('SIGINT', async () => {
       try {
         await mongoose.connection.close();
@@ -59,8 +61,10 @@ const connectDB = async () => {
     
   } catch (error) {
     console.error('❌ MongoDB connection failed:', error.message);
-    console.error('💡 Please check your MONGO_URI in .env file');
-    console.error('💡 Make sure MongoDB Atlas is accessible and credentials are correct');
+    console.error('💡 Please check your MongoDB connection settings:');
+    console.error('   - For local MongoDB: MONGO_URI_LOCAL=mongodb://localhost:27017/aaa_services');
+    console.error('   - For MongoDB Atlas: MONGO_URI=mongodb+srv://...');
+    console.error('   - Make sure local MongoDB is running on port 27017');
     process.exit(1);
   }
 };

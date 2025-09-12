@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Service = require('../models/Service');
 
-// POST /services
+// service add krne k liye
 router.post('/', async (req, res) => {
   try {
     const { name } = req.body;
@@ -17,7 +17,7 @@ router.post('/', async (req, res) => {
   }
 });
 
-// GET /services
+// saare services lane k liye
 router.get('/', async (req, res) => {
   try {
     const services = await Service.find({});
@@ -28,7 +28,7 @@ router.get('/', async (req, res) => {
   }
 });
 
-// GET /services/search?q=query
+// services search krne k liye
 router.get('/search', async (req, res) => {
   try {
     const { q } = req.query;

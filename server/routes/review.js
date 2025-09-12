@@ -4,14 +4,7 @@ const Review = require('../models/Review');
 const Business = require('../models/Business');
 const User = require('../models/user');
 
-// Test endpoint to check if reviews route is working
-router.get('/test', (req, res) => {
-  res.json({ 
-    message: 'Reviews route is working',
-    timestamp: new Date().toISOString(),
-    businessId: req.query.businessId || 'none'
-  });
-});
+
 
 // Health check endpoint to test database connectivity
 router.get('/health', async (req, res) => {
@@ -29,7 +22,7 @@ router.get('/health', async (req, res) => {
       }
     });
   } catch (error) {
-    console.error('🔍 Backend: Health check error:', error);
+    console.error('Health check error:', error);
     res.status(500).json({
       status: 'unhealthy',
       error: error.message,
@@ -133,9 +126,7 @@ router.post('/', authenticateToken, async (req, res) => {
     await review.populate('reviewer', 'firstName lastName profilePicture');
     await review.populate('business', 'businessName businessType images.logo');
 
-    console.log('🔍 Backend: Review submitted successfully - Review data:', review);
-    console.log('🔍 Backend: Review submitted successfully - Reviewer:', review.reviewer);
-    console.log('🔍 Backend: Review submitted successfully - Business:', review.business);
+    
 
     res.status(201).json({
       message: 'Review added successfully',
@@ -175,7 +166,7 @@ router.get('/', async (req, res) => {
     } = req.query;
 
     const skip = (page - 1) * limit;
-    let query = {}; // Temporarily remove status filter to debug
+    let query = {};
 
     // Apply filters
     if (businessId) query.business = businessId;
@@ -183,8 +174,7 @@ router.get('/', async (req, res) => {
     if (rating) query.rating = parseInt(rating);
     if (serviceType) query.serviceType = serviceType;
 
-    console.log('🔍 Backend: GET /api/reviews - Query:', query);
-    console.log('🔍 Backend: GET /api/reviews - BusinessId from query:', businessId);
+    
 
     // Build sort object
     const sort = {};
@@ -198,18 +188,7 @@ router.get('/', async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit));
 
-    console.log('🔍 Backend: GET /api/reviews - Found reviews:', reviews.length);
     
-    // Log review details for debugging
-    reviews.forEach((review, index) => {
-      console.log(`🔍 Backend: Review ${index + 1}:`, {
-        id: review._id,
-        rating: review.rating,
-        comment: review.comment,
-        reviewer: review.reviewer,
-        business: review.business
-      });
-    });
 
     // Get total count for pagination
     const total = await Review.countDocuments(query);
@@ -226,12 +205,62 @@ router.get('/', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('🔍 Backend: Get reviews error:', error);
-    console.error('🔍 Backend: Error stack:', error.stack);
+    console.error('Get reviews error:', error);
     res.status(500).json({
       message: 'Server error while fetching reviews',
       error: error.message,
       stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+    });
+  }
+});
+
+// GET /api/reviews/recent - Get recent reviews for Recent Activities
+router.get('/recent', async (req, res) => {
+  try {
+    const { limit = 6 } = req.query;
+
+    const reviews = await Review.find({})
+      .populate('reviewer', 'firstName lastName profilePicture')
+      .populate('business', 'businessName businessType images.logo location.city')
+      .sort({ createdAt: -1 })
+      .limit(parseInt(limit))
+      .lean();
+
+    // Format the response for Recent Activities
+    const formattedReviews = reviews.map(review => ({
+      id: review._id,
+      reviewer: {
+        name: `${review.reviewer?.firstName || ''} ${review.reviewer?.lastName || ''}`.trim(),
+        avatar: review.reviewer?.profilePicture || null,
+        id: review.reviewer?._id
+      },
+      business: {
+        name: review.business?.businessName || 'Unknown Business',
+        type: review.business?.businessType || 'other',
+        city: review.business?.location?.city || 'Unknown City',
+        logo: review.business?.images?.logo || null,
+        id: review.business?._id
+      },
+      rating: review.rating,
+      title: review.title || '',
+      comment: review.comment,
+      serviceType: review.serviceType,
+      createdAt: review.createdAt,
+      serviceDate: review.serviceDate
+    }));
+
+    res.json({
+      success: true,
+      reviews: formattedReviews,
+      total: formattedReviews.length
+    });
+
+  } catch (error) {
+    console.error('Recent reviews error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Failed to fetch recent reviews',
+      error: error.message
     });
   }
 });

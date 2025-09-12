@@ -4,7 +4,7 @@ const User = require('../models/user');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
-// Middleware to verify JWT token
+// jwt token verify krne k liye
 const authenticateToken = async (req, res, next) => {
   try {
     const authHeader = req.headers['authorization'];
@@ -179,6 +179,7 @@ router.get('/profile', authenticateToken, async (req, res) => {
 
 // PUT /api/users/profile - Update user profile
 router.put('/profile', authenticateToken, async (req, res) => {
+  
   try {
     const {
       firstName,
@@ -196,11 +197,15 @@ router.put('/profile', authenticateToken, async (req, res) => {
     if (location) updateData.location = location;
     if (preferences) updateData.preferences = preferences;
 
+    
+
     const updatedUser = await User.findByIdAndUpdate(
       req.user._id,
       updateData,
       { new: true, runValidators: true }
     ).select('-password');
+
+    
 
     res.json({
       message: 'Profile updated successfully',
@@ -208,7 +213,7 @@ router.put('/profile', authenticateToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Update profile error:', error);
+    console.error('Profile update error:', error);
     
     if (error.name === 'ValidationError') {
       const validationErrors = Object.values(error.errors).map(err => err.message);
@@ -220,6 +225,50 @@ router.put('/profile', authenticateToken, async (req, res) => {
 
     res.status(500).json({
       message: 'Server error while updating profile',
+      error: error.message
+    });
+  }
+});
+
+// PUT /api/users/profile-picture - Update profile picture
+router.put('/profile-picture', authenticateToken, async (req, res) => {
+  
+  try {
+    const { profilePicture } = req.body;
+
+    if (!profilePicture) {
+      return res.status(400).json({
+        message: 'Profile picture is required'
+      });
+    }
+
+    // Update user's profile picture
+    const updatedUser = await User.findByIdAndUpdate(
+      req.user._id,
+      { profilePicture },
+      { new: true, runValidators: true }
+    ).select('-password');
+
+    
+
+    res.json({
+      message: 'Profile picture updated successfully',
+      user: updatedUser
+    });
+
+  } catch (error) {
+    console.error('Update profile picture error:', error);
+    
+    if (error.name === 'ValidationError') {
+      const validationErrors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        message: 'Validation failed',
+        errors: validationErrors
+      });
+    }
+
+    res.status(500).json({
+      message: 'Server error while updating profile picture',
       error: error.message
     });
   }
