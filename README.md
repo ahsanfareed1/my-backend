@@ -68,12 +68,6 @@ SESSION_KEY=change-me-too
 PORT=5000
 FRONTEND_URL=http://localhost:3000
 
-# OAuth (optional)
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-FACEBOOK_APP_ID=
-FACEBOOK_APP_SECRET=
-
 # Email (optional but used by help center and password reset)
 GMAIL_USER=your@gmail.com
 GMAIL_APP_PASSWORD=your-app-password
