@@ -467,15 +467,6 @@ router.get('/', async (req, res) => {
       minRating,
       status
     };
-
-    // Try to get from cache first
-              // Cache temporarily disabled for stability
-          // const cachedResult = await redisCache.getCachedBusinessSearch(cacheKey);
-          // if (cachedResult) {
-          //   console.log('🚀 Backend: Serving from cache');
-          //   return res.json(cachedResult);
-          // }
-
     
     
     const skip = (page - 1) * limit;
@@ -1100,7 +1091,6 @@ router.post('/reset-verification', authenticateToken, async (req, res) => {
   }
 });
 
-// Temporary endpoint to list all businesses (for debugging)
 router.get('/debug/all', async (req, res) => {
   try {
     const businesses = await Business.find({})

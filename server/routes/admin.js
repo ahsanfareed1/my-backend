@@ -8,6 +8,40 @@ const Business = require('../models/Business');
 const Review = require('../models/Review');
 const User = require('../models/user');
 
+// helper: business rating recalc after hard delete
+async function recalculateBusinessRating(businessId) {
+  try {
+    const Review = require('../models/Review');
+    const Business = require('../models/Business');
+
+    const reviews = await Review.find({ business: businessId, status: 'active' }).select('rating').lean();
+
+    const ratingBreakdown = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+    for (const r of reviews) {
+      const key = (r.rating || 0).toString();
+      if (ratingBreakdown[key] !== undefined) ratingBreakdown[key]++;
+    }
+
+    const total = reviews.length;
+    const sum = Object.entries(ratingBreakdown).reduce((acc, [k, v]) => acc + parseInt(k, 10) * v, 0);
+    const average = total > 0 ? sum / total : 0;
+
+    await Business.findByIdAndUpdate(
+      businessId,
+      {
+        $set: {
+          'rating.average': average,
+          'rating.totalReviews': total,
+          'rating.ratingBreakdown': ratingBreakdown
+        }
+      },
+      { new: true }
+    );
+  } catch (_) {
+    // silent; rating will self-correct on future writes
+  }
+}
+
 // gmail setup for sending emails
 const transporter = nodemailer.createTransport({
   service: 'gmail',
@@ -170,8 +204,6 @@ router.get('/service-providers', authenticateAdmin, async (req, res) => {
       .sort({ createdAt: -1 })
       .limit(limit * 1)
       .skip((page - 1) * limit);
-
-    // extra verbose debug logs remove kr diye hain
 
     const total = await Business.countDocuments(query);
 
@@ -388,6 +420,30 @@ router.patch('/reviews/:id/status', authenticateAdmin, async (req, res) => {
   }
 });
 
+// hard delete a review (admin only)
+router.delete('/reviews/:id', authenticateAdmin, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const review = await Review.findById(id).select('business');
+    if (!review) {
+      return res.status(404).json({ message: 'Review not found' });
+    }
+
+    const businessId = review.business;
+    await Review.deleteOne({ _id: id });
+
+    // recalc business rating after deletion
+    if (businessId) {
+      await recalculateBusinessRating(businessId);
+    }
+
+    res.json({ message: 'Review permanently deleted' });
+  } catch (error) {
+    console.error('Hard delete review error:', error);
+    res.status(500).json({ message: 'Server error' });
+  }
+});
+
 // changing complaint status
 router.patch('/complaints/:id/status', authenticateAdmin, async (req, res) => {
   try {
@@ -484,7 +540,7 @@ router.patch('/complaints/:id/resolve', authenticateAdmin, async (req, res) => {
           <body>
             <div class="container">
               <div class="header">
-                <h2>✅ Your Complaint Has Been Resolved!</h2>
+                <h2>Your Complaint Has Been Resolved!</h2>
               </div>
               <div class="content">
                 <p>Dear User,</p>
@@ -519,7 +575,7 @@ router.patch('/complaints/:id/resolve', authenticateAdmin, async (req, res) => {
         const mailOptions = {
           from: 'aaaservicesdirectory@gmail.com',
           to: populatedComplaint.userEmail,
-          subject: `✅ Complaint Resolved - ${populatedComplaint.title}`,
+          subject: `Complaint Resolved - ${populatedComplaint.title}`,
           html: resolutionEmail
         };
         
@@ -734,7 +790,7 @@ router.delete('/users/:id', authenticateAdmin, async (req, res) => {
         <body>
           <div class="container">
             <div class="header">
-              <h2>⚠️ Account Deletion Notice</h2>
+              <h2>Account Deletion Notice</h2>
             </div>
             <div class="content">
               <p>Dear ${user.firstName} ${user.lastName},</p>
@@ -765,7 +821,7 @@ router.delete('/users/:id', authenticateAdmin, async (req, res) => {
       const mailOptions = {
         from: 'aaaservicesdirectory@gmail.com',
         to: user.email,
-        subject: '⚠️ Account Deletion Notice - AAA Services Directory',
+        subject: 'Account Deletion Notice - AAA Services Directory',
         html: deletionEmail
       };
 
@@ -907,7 +963,7 @@ router.post('/admin-users', authenticateAdmin, async (req, res) => {
       <body>
         <div class="container">
           <div class="header">
-            <h2>🔐 Welcome to AAA Services Directory</h2>
+            <h2>Welcome to AAA Services Directory</h2>
           </div>
           <div class="content">
             <p>Dear ${fullName},</p>
@@ -945,7 +1001,7 @@ router.post('/admin-users', authenticateAdmin, async (req, res) => {
     const mailOptions = {
       from: 'aaaservicesdirectory@gmail.com',
       to: email,
-      subject: '🔐 Welcome to AAA Services Directory - Set Your Password',
+      subject: 'Welcome to AAA Services Directory - Set Your Password',
       html: passwordSetupEmail
     };
 
@@ -1047,7 +1103,7 @@ router.delete('/admin-users/:id', authenticateAdmin, async (req, res) => {
         <body>
           <div class="container">
             <div class="header">
-              <h2>⚠️ Admin Account Deletion Notice</h2>
+              <h2>Admin Account Deletion Notice</h2>
             </div>
             <div class="content">
               <p>Dear ${adminUser.fullName},</p>
@@ -1079,7 +1135,7 @@ router.delete('/admin-users/:id', authenticateAdmin, async (req, res) => {
       const mailOptions = {
         from: 'aaaservicesdirectory@gmail.com',
         to: adminUser.email,
-        subject: '⚠️ Admin Account Deletion Notice - AAA Services Directory',
+        subject: 'Admin Account Deletion Notice - AAA Services Directory',
         html: deletionEmail
       };
 
@@ -1192,7 +1248,7 @@ router.get('/admin-users/validate-token/:token', async (req, res) => {
 router.post('/admin-users/setup-password', async (req, res) => {
   try {
     const { token, password } = req.body;
-    console.log('🔍 Setting up password for admin token:', token);
+    console.log('Setting up password for admin token:', token);
 
     if (!token || !password) {
       return res.status(400).json({ message: 'Token and password are required' });
@@ -1204,7 +1260,7 @@ router.post('/admin-users/setup-password', async (req, res) => {
       passwordResetExpires: { $gt: Date.now() }
     });
 
-    console.log('🔍 Admin user found for password setup:', adminUser ? 'Yes' : 'No');
+    console.log('Admin user found for password setup:', adminUser ? 'Yes' : 'No');
 
     if (!adminUser) {
       return res.status(400).json({ message: 'Invalid or expired token' });
@@ -1228,8 +1284,8 @@ router.post('/admin-users/setup-password', async (req, res) => {
       }
     );
 
-    console.log('🔍 Password set successfully for admin user:', adminUser.username);
-    console.log('🔍 Admin user status set to active');
+    console.log('Password set successfully for admin user:', adminUser.username);
+    console.log('Admin user status set to active');
 
     res.json({ message: 'Password set successfully' });
   } catch (error) {

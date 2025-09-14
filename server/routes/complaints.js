@@ -9,8 +9,8 @@ const nodemailer = require('nodemailer');
 const transporter = nodemailer.createTransport({
   service: 'gmail',
   auth: {
-    user: 'aaaservicesdirectory@gmail.com',
-    pass: 'qggwfeapxfsqtlxo'
+    user: process.env.GMAIL_USER,
+    pass: process.env.GMAIL_APP_PASSWORD
   }
 });
 
@@ -60,19 +60,7 @@ router.post('/', authenticateToken, async (req, res) => {
       userEmail
     } = req.body;
 
-    console.log('🔍 Backend: Received complaint data:', {
-      businessId,
-      title,
-      description,
-      serviceCategory,
-      severity,
-      contactInfo,
-      userEmail
-    });
-    console.log('🔍 Backend: User from token:', {
-      userId: req.user._id,
-      userEmail: req.user.email
-    });
+    
 
     // Validate required fields
     if (!businessId || !title || !description || !serviceCategory) {
@@ -94,11 +82,8 @@ router.post('/', authenticateToken, async (req, res) => {
     // Use provided userEmail or fallback to user's email from token
     const emailToUse = userEmail || req.user.email;
     
-    console.log('🔍 Backend: Final email to use:', emailToUse);
-    
     // Validate that we have an email
     if (!emailToUse) {
-      console.error('❌ Backend: No email available for complaint');
       return res.status(400).json({
         success: false,
         message: 'User email is required for complaint submission'
@@ -117,13 +102,8 @@ router.post('/', authenticateToken, async (req, res) => {
       contactInfo: contactInfo || {}
     });
 
-    console.log('🔍 Backend: Complaint object to save:', complaint);
-    console.log('🔍 Backend: Complaint userEmail field:', complaint.userEmail);
-
     await complaint.save();
     
-    console.log('🔍 Backend: Complaint saved successfully with ID:', complaint._id);
-    console.log('🔍 Backend: Saved complaint userEmail:', complaint.userEmail);
 
     // Send confirmation email to user
     const userName = req.user.firstName || req.user.displayName || 'User';
@@ -144,7 +124,7 @@ router.post('/', authenticateToken, async (req, res) => {
       <body>
         <div class="container">
           <div class="header">
-            <h2>✅ Complaint Submitted Successfully!</h2>
+            <h2>Complaint Submitted Successfully!</h2>
           </div>
           <div class="content">
             <p>Dear ${userName},</p>
@@ -174,7 +154,7 @@ router.post('/', authenticateToken, async (req, res) => {
     const mailOptions = {
       from: 'aaaservicesdirectory@gmail.com',
       to: emailToUse,
-      subject: `✅ Complaint Submitted - ${business.businessName}`,
+      subject: `Complaint Submitted - ${business.businessName}`,
       html: confirmationEmail
     };
 
@@ -200,7 +180,7 @@ router.post('/', authenticateToken, async (req, res) => {
         <body>
           <div class="container">
             <div class="header">
-              <h2>⚠️ New Complaint Received</h2>
+              <h2>New Complaint Received</h2>
             </div>
             <div class="content">
               <p>A new complaint has been filed against your business.</p>
@@ -227,7 +207,7 @@ router.post('/', authenticateToken, async (req, res) => {
       const businessMailOptions = {
         from: 'aaaservicesdirectory@gmail.com',
         to: businessEmail,
-        subject: `⚠️ New Complaint Filed - ${title}`,
+        subject: `New Complaint Filed - ${title}`,
         html: businessNotification
       };
 
@@ -242,7 +222,7 @@ router.post('/', authenticateToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error submitting complaint:', error);
+    console.error('Error submitting complaint:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to submit complaint. Please try again later.',
@@ -256,9 +236,7 @@ router.post('/', authenticateToken, async (req, res) => {
 // GET /api/complaints - Get all complaints for admin dashboard
 router.get('/', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    console.log('🔍 GET /api/complaints - Admin requesting complaints');
-    console.log('🔍 Query parameters:', req.query);
-    console.log('🔍 User making request:', req.user._id, req.user.email, req.user.role);
+    
     
     const {
       page = 1,
@@ -284,8 +262,7 @@ router.get('/', authenticateToken, requireAdmin, async (req, res) => {
     if (businessId) query.businessId = businessId;
     if (userId) query.userId = userId;
 
-    console.log('🔍 Final query:', JSON.stringify(query, null, 2));
-    console.log('🔍 Pagination:', { page, limit, skip });
+    
 
     // Build sort object
     const sort = {};
@@ -300,23 +277,13 @@ router.get('/', authenticateToken, requireAdmin, async (req, res) => {
       .skip(skip)
       .limit(parseInt(limit));
 
-    console.log('🔍 Found complaints:', complaints.length);
-    if (complaints.length > 0) {
-      console.log('🔍 First complaint sample:', {
-        id: complaints[0]._id,
-        title: complaints[0].title,
-        status: complaints[0].status,
-        userEmail: complaints[0].userEmail
-      });
-    }
+    
 
     // Get total count for pagination
     const total = await Complaint.countDocuments(query);
-    console.log('🔍 Total complaints in database:', total);
 
     // Get statistics for admin dashboard
     const stats = await Complaint.getStats();
-    console.log('🔍 Complaint stats:', stats);
 
     res.json({
       success: true,
@@ -332,7 +299,7 @@ router.get('/', authenticateToken, requireAdmin, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error fetching complaints:', error);
+    console.error('Error fetching complaints:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch complaints',
@@ -362,7 +329,7 @@ router.get('/:id', authenticateToken, requireAdmin, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error fetching complaint:', error);
+    console.error('Error fetching complaint:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch complaint',
@@ -412,7 +379,7 @@ router.patch('/:id/status', authenticateToken, requireAdmin, async (req, res) =>
           </head>
           <body>
             <div class="header">
-              <h2>📋 Complaint Status Update</h2>
+              <h2>Complaint Status Update</h2>
             </div>
             <div class="content">
               <p>Dear <strong>${user.firstName || 'User'}</strong>,</p>
@@ -438,7 +405,7 @@ router.patch('/:id/status', authenticateToken, requireAdmin, async (req, res) =>
         const mailOptions = {
           from: 'aaaservicesdirectory@gmail.com',
           to: user.email,
-          subject: `📋 Complaint Status Updated - ${complaint.title}`,
+          subject: `Complaint Status Updated - ${complaint.title}`,
           html: statusUpdateEmail
         };
 
@@ -457,7 +424,7 @@ router.patch('/:id/status', authenticateToken, requireAdmin, async (req, res) =>
     });
 
   } catch (error) {
-    console.error('❌ Error updating complaint status:', error);
+    console.error('Error updating complaint status:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to update complaint status',
@@ -516,7 +483,7 @@ router.patch('/:id/resolve', authenticateToken, requireAdmin, async (req, res) =
         </head>
         <body>
           <div class="header">
-            <h2>✅ Complaint Resolved</h2>
+            <h2>Complaint Resolved</h2>
           </div>
           <div class="content">
             <p>Dear <strong>${user.firstName || 'User'}</strong>,</p>
@@ -548,7 +515,7 @@ router.patch('/:id/resolve', authenticateToken, requireAdmin, async (req, res) =
       const mailOptions = {
         from: 'aaaservicesdirectory@gmail.com',
         to: user.email,
-        subject: `✅ Complaint Resolved - ${complaint.title}`,
+        subject: `Complaint Resolved - ${complaint.title}`,
         html: resolutionEmail
       };
 
@@ -567,7 +534,7 @@ router.patch('/:id/resolve', authenticateToken, requireAdmin, async (req, res) =
     });
 
   } catch (error) {
-    console.error('❌ Error resolving complaint:', error);
+    console.error('Error resolving complaint:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to resolve complaint',
@@ -608,7 +575,7 @@ router.post('/:id/notes', authenticateToken, requireAdmin, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error adding note:', error);
+    console.error('Error adding note:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to add note',
@@ -630,7 +597,7 @@ router.get('/user/my-complaints', authenticateToken, async (req, res) => {
     });
 
   } catch (error) {
-    console.error('❌ Error fetching user complaints:', error);
+    console.error('Error fetching user complaints:', error);
     res.status(500).json({
       success: false,
       message: 'Failed to fetch complaints',
@@ -676,7 +643,7 @@ router.get('/health', async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Health check failed:', error);
+    console.error('Health check failed:', error);
     res.status(500).json({
       success: false,
       message: 'Complaints system health check failed',
@@ -688,11 +655,11 @@ router.get('/health', async (req, res) => {
 // GET /api/complaints/fix-email - Fix existing complaints without userEmail (for migration)
 router.get('/fix-email', authenticateToken, requireAdmin, async (req, res) => {
   try {
-    console.log('🔍 Starting email fix for existing complaints...');
+    
     
     // Find complaints without userEmail
     const complaintsWithoutEmail = await Complaint.find({ userEmail: { $exists: false } });
-    console.log('🔍 Found complaints without email:', complaintsWithoutEmail.length);
+    
     
     let fixedCount = 0;
     
@@ -704,12 +671,12 @@ router.get('/fix-email', authenticateToken, requireAdmin, async (req, res) => {
           complaint.userEmail = user.email;
           await complaint.save();
           fixedCount++;
-          console.log(`🔍 Fixed complaint ${complaint._id} with email: ${user.email}`);
+          
         } else {
-          console.log(`❌ Could not fix complaint ${complaint._id} - user not found or no email`);
+          
         }
       } catch (error) {
-        console.error(`❌ Error fixing complaint ${complaint._id}:`, error);
+        console.error(`Error fixing complaint ${complaint._id}:`, error);
       }
     }
     
@@ -721,7 +688,7 @@ router.get('/fix-email', authenticateToken, requireAdmin, async (req, res) => {
     });
     
   } catch (error) {
-    console.error('❌ Error in fix-email route:', error);
+    console.error('Error in fix-email route:', error);
     res.status(500).json({
       success: false,
       message: 'Error fixing emails',

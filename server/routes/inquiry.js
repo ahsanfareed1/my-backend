@@ -152,14 +152,14 @@ router.post('/', async (req, res) => {
       <body>
         <div class="container">
           <div class="header">
-            <h1>📩 New Inquiry Received</h1>
+            <h1>New Inquiry Received</h1>
             <p>from ${customerName}</p>
           </div>
           
           <div class="content">
             <div class="business-info">
-              <strong>🏢 Business:</strong> ${business.businessName || 'N/A'}<br>
-              <strong>📍 Location:</strong> ${business.location?.city || 'N/A'}
+              <strong>Business:</strong> ${business.businessName || 'N/A'}<br>
+              <strong>Location:</strong> ${business.location?.city || 'N/A'}
             </div>
             
             <div class="inquiry-details">
@@ -184,28 +184,28 @@ router.post('/', async (req, res) => {
               
               ${serviceType ? `
               <div class="detail-row">
-                <span class="detail-label">🔧 Service:</span>
+                <span class="detail-label">Service:</span>
                 <span class="detail-value">${serviceType}</span>
               </div>
               ` : ''}
               
               ${preferredDate ? `
               <div class="detail-row">
-                <span class="detail-label">📅 Preferred Date:</span>
+                <span class="detail-label">Preferred Date:</span>
                 <span class="detail-value">${preferredDate}</span>
               </div>
               ` : ''}
               
               ${budget ? `
               <div class="detail-row">
-                <span class="detail-label">💰 Budget:</span>
+                <span class="detail-label">Budget:</span>
                 <span class="detail-value">${budget}</span>
               </div>
               ` : ''}
             </div>
             
             <div class="message-box">
-              <h4 style="color: #2E7D32; margin-top: 0;">💬 Message:</h4>
+              <h4 style="color: #2E7D32; margin-top: 0;">Message:</h4>
               <p style="margin: 0; white-space: pre-wrap;">${message}</p>
             </div>
             
@@ -249,7 +249,7 @@ Sent from AAA Services Directory
     const mailOptions = {
       from: 'aaaservicesdirectory@gmail.com',
       to: businessEmail,
-      subject: `📩 New Inquiry from ${customerName} - ${business.businessName}`,
+      subject: `New Inquiry from ${customerName} - ${business.businessName}`,
       html: htmlEmail,
       text: textEmail
     };
@@ -260,7 +260,7 @@ Sent from AAA Services Directory
     const customerMailOptions = {
       from: 'aaaservicesdirectory@gmail.com',
       to: customerEmail,
-      subject: `✅ Inquiry Sent to ${business.businessName}`,
+      subject: `Inquiry Sent to ${business.businessName}`,
       html: `
         <!DOCTYPE html>
         <html>
@@ -276,7 +276,7 @@ Sent from AAA Services Directory
         <body>
           <div class="container">
             <div class="header">
-              <h2>✅ Inquiry Sent Successfully!</h2>
+              <h2>Inquiry Sent Successfully!</h2>
             </div>
             <div class="content">
               <p>Dear ${customerName},</p>

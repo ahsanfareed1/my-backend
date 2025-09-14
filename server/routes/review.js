@@ -166,7 +166,7 @@ router.get('/', async (req, res) => {
     } = req.query;
 
     const skip = (page - 1) * limit;
-    let query = {};
+    let query = { status: 'active' };
 
     // Apply filters
     if (businessId) query.business = businessId;
@@ -219,7 +219,7 @@ router.get('/recent', async (req, res) => {
   try {
     const { limit = 6 } = req.query;
 
-    const reviews = await Review.find({})
+    const reviews = await Review.find({ status: 'active' })
       .populate('reviewer', 'firstName lastName profilePicture')
       .populate('business', 'businessName businessType images.logo location.city')
       .sort({ createdAt: -1 })

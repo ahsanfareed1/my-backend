@@ -191,7 +191,6 @@ router.post('/register', validateRegistrationInput, async (req, res) => {
   }
 });
 
-// Business Registration Creation Function
 // business register request handle krne k liye
 router.post('/business/register', validateRegistrationInput, async (req, res) => {
   const { 
@@ -801,7 +800,7 @@ router.post('/reset-password', async (req, res) => {
   }
 });
 
-// ==================== Verify Reset Token ====================
+// =======Verify Reset Token ========
 router.get('/verify-reset-token/:token', async (req, res) => {
   const { token } = req.params;
 
@@ -841,7 +840,6 @@ router.get('/verify-reset-token/:token', async (req, res) => {
   }
 });
 
-// ==================== Email Verification ====================
 // email verify krne k liye
 router.get('/verify-email/:token', async (req, res) => {
   const { token } = req.params;
@@ -876,7 +874,6 @@ router.get('/verify-email/:token', async (req, res) => {
 
     if (!user) {
       // agr user na mile to helpful message return krdo
-      // For now, return a more helpful message
       return res.status(200).json({
         success: true,
         alreadyVerified: true,
@@ -919,7 +916,7 @@ router.get('/verify-email/:token', async (req, res) => {
   }
 });
 
-// ==================== Get User Info from Token ====================
+// ===Get User Info from Token ===========
 router.get('/verify-email-info/:token', async (req, res) => {
   const { token } = req.params;
   

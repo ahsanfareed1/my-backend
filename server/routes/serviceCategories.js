@@ -2,12 +2,6 @@ const express = require('express');
 const router = express.Router();
 const ServiceCategory = require('../models/ServiceCategory');
 
-// const redisCache = require('../config/redis'); // Temporarily disabled
-
-
-
-
-
 // active service categories lane k liye
 router.get('/', async (req, res) => {
   try {
@@ -416,13 +410,4 @@ router.get('/:id', async (req, res) => {
     });
   }
 });
-
-
-
-
-
-
-
-
-
 module.exports = router;

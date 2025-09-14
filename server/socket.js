@@ -347,7 +347,6 @@ const initializeSocket = (server) => {
 
     // when user changes their status
     socket.on('user-status', (status) => {
-      // telling everyone about status change
       socket.broadcast.emit('user-status-change', {
         userId: socket.userId,
         status,
@@ -362,8 +361,6 @@ const initializeSocket = (server) => {
       // removing user from our online list
       connectedUsers.delete(socket.userId);
       userSockets.delete(socket.id);
-      
-      
       
       // telling everyone that user went offline
       socket.broadcast.emit('user-status-change', {
